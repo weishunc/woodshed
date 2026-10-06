@@ -108,6 +108,7 @@ input[type=range]{accent-color:var(--accent);width:100%;margin:0}
 .chip[aria-pressed="true"]::before{content:"✓ ";}
 
 .code{display:grid;gap:6px}
+.code-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
 .code-input{width:100%;font:500 16px var(--f-mono);letter-spacing:.06em;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink)}
 .code-input.bad{border-color:var(--danger)}
 .code-help{margin:0;font-size:12.5px;color:var(--muted)}
@@ -258,9 +259,10 @@ kbd{font:600 11.5px var(--f-mono);background:var(--surface);border:1px solid var
       </div>
     </div>
     <div class="code">
-      <label for="codeInput" class="ctl-label">Strum code</label>
-      <input id="codeInput" class="code-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="characters" aria-describedby="codeHelp codeMsg">
-      <p class="code-help" id="codeHelp"><b>D</b> <b>U</b> strum · <b>-</b> let ring · <b>.</b> rest · <b>&gt;</b> accent the next strum · one group per beat: 1 slot = quarter, 2 = 8ths, 3 = triplets, 4 = 16ths · <b>|</b> new bar · <kbd>Enter</kbd> tidies the code</p>
+      <div class="code-head"><span class="ctl-label">Edit as text</span>
+        <div class="seg" id="fmtSeg"><button data-v="strum" aria-pressed="true">Strum code</button><button data-v="notes" aria-pressed="false">Note names</button></div></div>
+      <input id="codeInput" class="code-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Strum code" aria-describedby="codeHelp codeMsg">
+      <p class="code-help" id="codeHelp"></p>
       <p class="code-msg" id="codeMsg" aria-live="polite"></p>
     </div>
     <div id="scoreWrap">
@@ -337,7 +339,7 @@ const S = {
   bpm:80, playing:false, flow:'loop', patOn:true, sound:'strum',
   clickOn:true, accent:true, subdiv:'off', clickVol:.8, patVol:.8, countIn:true,
   tr:{on:false, step:4, every:4, target:120}, gap:{on:false, play:2, mute:2},
-  pattern:null, meta:'', comp:null, drawN:0, editing:false, tool:'strum',
+  pattern:null, meta:'', comp:null, drawN:0, editing:false, tool:'strum', codeFmt:'strum',
 };
 
 /* ---------- pattern language ----------
@@ -581,6 +583,82 @@ function parseCode(text){
   }
   if (!hits) return {error:'Add at least one D or U.'};
   return {P:{name:'Custom pattern', beats, bars}, typed};
+}
+
+/* ---------- note names (q 8 8 q. 8 | h r4 >8 8) ---------- */
+const NOTE_TICKS = {w:48, 1:48, h:24, 2:24, q:12, 4:12, 8:6, 16:3};
+const TICK_NAME = {48:'w', 36:'h.', 24:'h', 18:'q.', 12:'q', 9:'8.', 6:'8', 3:'16', 4:'t8', 8:'tq'};
+
+function fmtBeats(t){
+  const whole = Math.floor(t / TPB), frac = {0:'', 3:'¼', 4:'⅓', 6:'½', 8:'⅔', 9:'¾'}[t % TPB];
+  const n = frac === undefined ? String(+(t / TPB).toFixed(2)) : (whole || !frac ? whole : '') + frac;
+  return `${n} beat${t === TPB ? '' : 's'}`;
+}
+
+function noteText(C){
+  const out = []; let last = null;
+  C.bars.forEach((bar, b) => {
+    if (b) out.push('|');
+    if (bar.wholeRest){ out.push({txt:{4:'rw', 3:'rh.', 2:'rh'}[C.beats]}); last = null; return; }
+    bar.beats.forEach(bt => bt.events.forEach(e => {
+      if (e.hidden) return;
+      if (e.tied && last) last.tie = true;
+      const tok = {e}; out.push(tok); last = e.rest ? null : tok;
+    }));
+  });
+  return out.map(t => t === '|' ? '|' : t.txt
+    || (t.e.accent ? '>' : '') + (t.e.rest ? 'r' : '') + TICK_NAME[t.e.disp || t.e.dur] + (t.tie ? '~' : '')).join(' ');
+}
+
+function parseNotes(text){
+  const barsTxt = text.split('|').map(s => s.trim()).filter(Boolean);
+  if (!barsTxt.length) return {error:'Type some notes, for example  q 8 8 q. 8'};
+  if (barsTxt.length > 8) return {error:'Keep it to 8 bars or fewer.'};
+  const bars = []; let beats = 0, tiePending = false, hits = 0;
+  for (let b = 0; b < barsTxt.length; b++){
+    const evs = []; let t = 0;
+    for (const tok of barsTxt[b].split(/\s+/)){
+      const m = /^(>)?(r)?(t)?(w|h|q|16|1|2|4|8)(\.)?(~)?$/i.exec(tok);
+      if (!m) return {error:`"${tok}" isn't a note. Use w, h, q, 8 or 16, add . for dotted, r for a rest, t for a triplet.`};
+      const [, acc, rest, trip, val, dot, tie] = m;
+      let d = NOTE_TICKS[val.toLowerCase()];
+      if (trip){
+        if (dot || (d !== 6 && d !== 12)) return {error:`"${tok}": only triplet 8ths (t8) and triplet quarters (tq) are supported.`};
+        d = d * 2 / 3;
+      } else if (dot){
+        if (d === 3) return {error:`"${tok}": a dotted 16th is shorter than this editor's 16th grid. Use 16 or 8. instead.`};
+        d *= 1.5;
+      }
+      if (rest && acc) return {error:`"${tok}": a rest can't be accented.`};
+      if (rest && tie) return {error:`"${tok}": a rest can't be tied.`};
+      if (rest && tiePending) return {error:`The tie (~) before "${tok}" needs a note after it, not a rest.`};
+      evs.push({start:t, dur:d, rest:!!rest, accent:!!acc, tied:!rest && tiePending});
+      if (!rest) hits++;
+      tiePending = !!tie; t += d;
+    }
+    const nb = t / TPB;
+    if (t % TPB || nb < 2 || nb > 4) return {error:`Bar ${b+1} adds up to ${fmtBeats(t)}. A bar needs 2, 3 or 4 beats.`};
+    if (beats && nb !== beats) return {error:`Bar ${b+1} adds up to ${fmtBeats(t)}, but bar 1 has ${beats}. Every bar needs the same length.`};
+    beats = nb;
+    // lay the notes onto each beat's smallest grid that fits them
+    const bar = [];
+    for (let k = 0; k < beats; k++){
+      const b0 = k * TPB;
+      const offs = evs.filter(e => e.start >= b0 && e.start < b0 + TPB).map(e => e.start - b0);
+      const n = [1,2,4,3].find(n => offs.every(o => o % (TPB / n) === 0));
+      if (!n) return {error:`Beat ${k+1} of bar ${b+1} mixes triplets with straight 8ths or 16ths. Fill each beat with one kind.`};
+      let s = '';
+      for (let j = 0; j < n; j++){
+        const tt = b0 + j * TPB / n, e = evs.find(e => e.start <= tt && tt < e.start + e.dur);
+        s += e.rest ? '.' : e.start === tt ? (e.tied ? '-' : e.accent ? 'X' : 'x') : '-';
+      }
+      bar.push(s);
+    }
+    bars.push(bar);
+  }
+  if (tiePending) return {error:'The last note has a tie (~), but no note follows it.'};
+  if (!hits) return {error:'Add at least one note.'};
+  return {P:{name:'Custom pattern', beats, bars:normalizeBars(bars)}};
 }
 
 // How many typed D/U letters disagree with the direction the hand motion gives that slot
@@ -1244,21 +1322,32 @@ $('#legend').addEventListener('click', ev => {
 });
 
 const codeIn = $('#codeInput'), codeMsg = $('#codeMsg');
+const FMT = {
+  strum:{label:'Strum code', write:C => patternCode(C), parse:parseCode,
+    help:'<b>D</b> <b>U</b> strum · <b>-</b> let ring · <b>.</b> rest · <b>&gt;</b> accent the next strum · one group per beat: 1 slot = quarter, 2 = 8ths, 3 = triplets, 4 = 16ths · <b>|</b> new bar · <kbd>Enter</kbd> tidies the code'},
+  notes:{label:'Note names', write:C => noteText(C), parse:parseNotes,
+    help:'<b>w h q 8 16</b> whole to 16th (or <b>1 2 4 8 16</b>) · <b>q.</b> dotted · <b>r8</b> rest · <b>t8</b> triplet 8th, three per beat · <b>~</b> tie to the next note · <b>&gt;</b> accent · <b>|</b> new bar · <kbd>Enter</kbd> tidies the text'},
+};
 function showCode(){
-  codeIn.value = patternCode(S.comp);
+  const f = FMT[S.codeFmt];
+  codeIn.value = f.write(S.comp);
+  codeIn.setAttribute('aria-label', f.label);
+  $('#codeHelp').innerHTML = f.help;
   codeIn.classList.remove('bad'); codeIn.removeAttribute('aria-invalid');
   codeMsg.textContent = ''; codeMsg.className = 'code-msg';
 }
+bindSeg('fmtSeg', v => { S.codeFmt = v; setSeg('fmtSeg', v); showCode(); });
 codeIn.addEventListener('input', () => {
-  const r = parseCode(codeIn.value);
+  const r = FMT[S.codeFmt].parse(codeIn.value);
   codeIn.classList.toggle('bad', !!r.error);
   if (r.error){ codeIn.setAttribute('aria-invalid', 'true'); codeMsg.textContent = r.error; codeMsg.className = 'code-msg err'; return; }
   codeIn.removeAttribute('aria-invalid'); codeMsg.textContent = '';
   setPattern(r.P, 'Your edit', true);
 });
 function commitCode(){
-  const r = parseCode(codeIn.value);
+  const r = FMT[S.codeFmt].parse(codeIn.value);
   if (r.error) return;
+  if (S.codeFmt === 'notes'){ showCode(); return; }
   const fixes = dirFixes(compile(r.P), r.typed);
   codeIn.value = patternCode(S.comp);
   codeMsg.className = 'code-msg';
