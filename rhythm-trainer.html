@@ -29,6 +29,7 @@
 }
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--f-body)}
 button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -75,6 +76,37 @@ input[type=range]{accent-color:var(--accent);width:100%;margin:0}
 .pill.live{background:var(--ink);color:var(--paper)}
 .pill.gap{background:transparent;border:1.5px dashed var(--muted);color:var(--ink)}
 #statusSub{font:12px var(--f-mono);color:var(--muted)}
+
+/* sticky transport: pinned to the top while scrolling, compact once it is stuck */
+#transportSentinel{height:0;margin-bottom:-18px}
+.transport{position:sticky;top:env(safe-area-inset-top, 0px);z-index:20;transition:padding .15s,box-shadow .15s,border-radius .15s}
+.transport.compact{padding:8px 14px;gap:8px 18px;border-radius:0 0 14px 14px;box-shadow:0 8px 20px -10px rgba(0,0,0,.45)}
+.transport.compact .play{width:44px;height:44px}
+.transport.compact .play svg{width:18px;height:18px}
+.transport.compact .tempo{gap:3px}
+.transport.compact #bpmVal{font-size:34px}
+.transport.compact #tempoName{display:none}
+.transport.compact .stepper button{width:30px;height:30px;font-size:16px}
+.transport.compact .tap{height:38px;min-width:0;padding:0 12px}
+.transport.compact .tap small{display:none}
+.transport.compact .dots{gap:7px}
+.transport.compact .dot{width:13px;height:13px;border-width:1.5px}
+.transport.compact .status{min-width:0}
+.transport.compact #statusSub{display:none}
+@media (max-width:560px){
+  /* phone: play | tempo | status on one row, beat dots underneath */
+  .transport.compact{display:grid;grid-template-columns:auto 1fr auto;gap:6px 12px}
+  .transport.compact .tap{display:none}
+  .transport.compact .play,.transport.compact .tempo{grid-row:1}
+  .transport.compact .status{grid-row:1;grid-column:3}
+  .transport.compact .dots{grid-row:2;grid-column:1 / -1;justify-content:center}
+  .transport.compact .pill{padding:4px 8px;font-size:10.5px}
+  .transport.compact .pills{flex-direction:column;align-items:flex-end;gap:3px}
+  .transport.compact .tempo{min-width:0}
+  .transport.compact .bpm-row{gap:6px}
+  .transport.compact #bpmVal{font-size:30px}
+  .transport.compact .stepper button{width:28px;height:28px}
+}
 
 /* music stand */
 .stand{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px 16px;display:grid;gap:14px;min-width:0}
@@ -189,7 +221,7 @@ input[type=checkbox].sw:disabled,.seg button:disabled{opacity:.4;cursor:not-allo
 kbd{font:600 11.5px var(--f-mono);background:var(--surface);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;color:var(--ink)}
 
 @media (prefers-reduced-motion: reduce){
-  .dot,.play,input[type=checkbox].sw,input[type=checkbox].sw::before{transition:none}
+  .dot,.play,.transport,input[type=checkbox].sw,input[type=checkbox].sw::before{transition:none}
 }
 </style>
 
@@ -205,6 +237,7 @@ kbd{font:600 11.5px var(--f-mono);background:var(--surface);border:1px solid var
     </div>
   </header>
 
+  <div id="transportSentinel" aria-hidden="true"></div>
   <section class="transport" aria-label="Transport">
     <button class="play" id="playBtn" aria-label="Play (Space)">
       <svg id="playIcon" viewBox="0 0 24 24"><path d="M6 3.5v17l14-8.5z"/></svg>
@@ -1430,6 +1463,11 @@ document.addEventListener('keydown', ev => {
   }
 });
 document.addEventListener('keyup', ev => { if (ev.code === 'Space' && !typing(ev.target)) ev.preventDefault(); });
+
+// Compact transport once its spot in the page has scrolled past the top of the screen
+new IntersectionObserver(([e]) => {
+  $('.transport').classList.toggle('compact', !e.isIntersecting && e.boundingClientRect.top < 0);
+}).observe($('#transportSentinel'));
 
 new ResizeObserver(() => { if (S.comp && Math.abs($('#score').clientWidth - lastW) > 2) render(); }).observe($('#scoreWrap'));
 if (document.fonts) document.fonts.ready.then(() => S.comp && render());
