@@ -976,14 +976,54 @@ function ks(freq, secs, damp, bright){
   return b;
 }
 
-function initAudio(){
-  if (ctx) return;
-  ctx = new (window.AudioContext || window.webkitAudioContext)({latencyHint:'interactive'});
-  busClick = ctx.createGain(); busClick.connect(ctx.destination);
+/* iOS (every iPhone browser runs WebKit) mutes Web Audio when the ring/silent switch is on silent,
+   unless the page's audio session is "playback". Newer iOS takes the audioSession hint; older iOS
+   switches category when an <audio> element is playing, so a silent one loops while we play. */
+let keepAlive = null;
+function silentWavURI(){
+  const sr = 8000, n = 800, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  let bin = ''; new Uint8Array(buf).forEach(b => bin += String.fromCharCode(b));
+  return 'data:audio/wav;base64,' + btoa(bin);
+}
+function unlockAudio(){                       // must run inside the tap that starts playback
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+  if (!keepAlive){
+    keepAlive = new Audio(silentWavURI());
+    keepAlive.loop = true; keepAlive.setAttribute('playsinline', ''); keepAlive.setAttribute('x-webkit-airplay', 'deny');
+  }
+  keepAlive.play().catch(() => {});
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  const src = ctx.createBufferSource();      // a one-sample silent sound unlocks older iOS
+  src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate); src.connect(ctx.destination); src.start(0);
+}
+
+// Each play session gets its own output chain, so Stop can cut sounds that are already scheduled
+let session = null;
+function newSession(){
+  if (session){
+    const old = session;
+    old.gain.setTargetAtTime(0, ctx.currentTime, .01);
+    setTimeout(() => old.disconnect(), 300);
+  }
+  session = ctx.createGain(); session.connect(ctx.destination);
+  busClick = ctx.createGain(); busClick.connect(session);
   const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -16; comp.ratio.value = 4; comp.connect(ctx.destination);
+  comp.threshold.value = -16; comp.ratio.value = 4; comp.connect(session);
   busPat = ctx.createGain(); busPat.connect(comp);
   applyVolumes();
+}
+
+function initAudio(){
+  if (ctx) return;
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+  ctx = new (window.AudioContext || window.webkitAudioContext)({latencyHint:'interactive'});
+  unlockAudio();                             // before the slower sound synthesis below
+  newSession();
   const EM = [82.41, 123.47, 164.81, 196.00, 246.94, 329.63];
   bufs.strum = EM.map(f => ks(f, 2.4, .9965, .55));
   bufs.single = ks(146.83, 1.4, .992, .45);
@@ -1083,7 +1123,7 @@ function swingInv(q, m16){
 let timer = null, nextT = 0, pos = {bar:0, beat:0}, passIdx = 0, barsDone = 0, vq = [], lastEntry = null;
 
 function start(){
-  initAudio(); ctx.resume();
+  initAudio(); unlockAudio(); newSession();
   S.playing = true; passIdx = 0; barsDone = 0; vq = []; lastEntry = null;
   pos = {bar:S.countIn ? -1 : 0, beat:0};
   nextT = ctx.currentTime + .1;
@@ -1095,7 +1135,8 @@ function start(){
 }
 function stop(){
   S.playing = false; clearInterval(timer);
-  if (ctx) ctx.suspend().then(() => ctx.resume());
+  if (ctx) newSession();                     // silences anything already scheduled
+  if (keepAlive) keepAlive.pause();
   $('#playIcon').innerHTML = '<path d="M6 3.5v17l14-8.5z"/>';
   $('#playBtn').setAttribute('aria-label', 'Play (Space)');
   $('#playhead').hidden = true; $('#countBadge').hidden = true; $('#gapPill').hidden = true;
@@ -1106,6 +1147,11 @@ function stop(){
   updateTrainerStatus();
 }
 function togglePlay(){ S.playing ? stop() : start(); }
+
+// iOS can suspend ("interrupt") audio after a call, Siri or a screen lock: pick it back up
+function wakeAudio(){ if (ctx && S.playing && ctx.state !== 'running') ctx.resume().catch(() => {}); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); });
+document.addEventListener('touchend', wakeAudio, {passive:true});
 
 function pump(){
   const ahead = document.hidden ? 1.5 : .12;
