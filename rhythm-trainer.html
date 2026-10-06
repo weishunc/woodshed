@@ -33,8 +33,8 @@
 body{background:var(--paper);color:var(--ink);font:15px/1.5 var(--f-body)}
 button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:22px 56px;display:grid;gap:18px}
-@media (max-width:520px){.wrap{padding-inline:16px}}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px));padding-block:22px 56px;display:grid;gap:18px}
+@media (max-width:520px){.wrap{padding-inline:max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px))}}
 
 /* header */
 .top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 20px}
@@ -80,7 +80,8 @@ input[type=range]{accent-color:var(--accent);width:100%;margin:0}
 /* sticky transport: pinned to the top while scrolling, compact once it is stuck */
 #transportSentinel{height:0;margin-bottom:-18px}
 .transport{position:sticky;top:env(safe-area-inset-top, 0px);z-index:20;transition:padding .15s,box-shadow .15s,border-radius .15s}
-.transport.compact{padding:8px 14px;gap:8px 18px;border-radius:0 0 14px 14px;box-shadow:0 8px 20px -10px rgba(0,0,0,.45)}
+.transport.stuck{border-radius:0 0 14px 14px;box-shadow:0 8px 20px -10px rgba(0,0,0,.45)}
+.transport.compact{padding:8px 14px;gap:8px 18px}
 .transport.compact .play{width:44px;height:44px}
 .transport.compact .play svg{width:18px;height:18px}
 .transport.compact .tempo{gap:3px}
@@ -106,6 +107,21 @@ input[type=range]{accent-color:var(--accent);width:100%;margin:0}
   .transport.compact .bpm-row{gap:6px}
   .transport.compact #bpmVal{font-size:30px}
   .transport.compact .stepper button{width:28px;height:28px}
+}
+/* short screens (a phone in landscape): one slim row, compact from the start */
+.transport.slim{flex-wrap:nowrap;padding:6px 12px;gap:12px}
+.transport.slim .play{width:40px;height:40px}
+.transport.slim .tempo{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0}
+.transport.slim .bpm-row{flex:none}
+.transport.slim #bpmVal{font-size:28px}
+.transport.slim .stepper button{width:28px;height:28px}
+.transport.slim input[type=range]{flex:1;min-width:60px}
+.transport.slim .tap{height:34px}
+.transport.slim .status{flex:none}
+.transport.slim .pills{flex-wrap:nowrap}
+@media (max-height:500px){
+  .wrap{padding-block:12px 40px;gap:12px}
+  #transportSentinel{margin-bottom:-12px}
 }
 
 /* music stand */
@@ -1465,9 +1481,21 @@ document.addEventListener('keydown', ev => {
 document.addEventListener('keyup', ev => { if (ev.code === 'Space' && !typing(ev.target)) ev.preventDefault(); });
 
 // Compact transport once its spot in the page has scrolled past the top of the screen
+// (always compact, in one slim row, on short screens such as a phone in landscape)
+const shortScreen = matchMedia('(max-height: 500px)');
+let stuck = false;
+function updateTransport(){
+  const t = $('.transport');
+  t.classList.toggle('stuck', stuck);
+  t.classList.toggle('compact', stuck || shortScreen.matches);
+  t.classList.toggle('slim', shortScreen.matches);
+}
 new IntersectionObserver(([e]) => {
-  $('.transport').classList.toggle('compact', !e.isIntersecting && e.boundingClientRect.top < 0);
+  stuck = !e.isIntersecting && e.boundingClientRect.top < 0;
+  updateTransport();
 }).observe($('#transportSentinel'));
+shortScreen.addEventListener('change', updateTransport);
+updateTransport();
 
 new ResizeObserver(() => { if (S.comp && Math.abs($('#score').clientWidth - lastW) > 2) render(); }).observe($('#scoreWrap'));
 if (document.fonts) document.fonts.ready.then(() => S.comp && render());
