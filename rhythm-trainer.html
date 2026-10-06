@@ -966,7 +966,7 @@ function render(){
     html += `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${label}">${out.join('')}</svg>`;
   }
   score.innerHTML = html;
-  [...score.children].forEach((svg, r) => G.rows[r] = svg.offsetTop);
+  G.rows = [...score.children];   // row <svg>s; SVG has no offsetTop, so positions are measured when drawing
   lit = new Set(); elCache = {};
   $('#playhead').style.height = H + 'px';
   $('#legend').innerHTML = edit
@@ -1278,7 +1278,9 @@ function frame(){
       if (e.swing) p = swingInv(p, e.m16);
       const tick = e.beat * TPB + p, g = G.bars[e.bar], bar = S.comp.bars[e.bar];
       ph.hidden = false;
-      ph.style.transform = `translate(${g.ix + tick / TPB * g.bw - 1}px, ${G.rows[g.row] || 0}px)`;
+      const rowEl = G.rows[g.row];
+      const rowTop = rowEl ? rowEl.getBoundingClientRect().top - $('#scoreWrap').getBoundingClientRect().top : 0;
+      ph.style.transform = `translate(${g.ix + tick / TPB * g.bw - 1}px, ${rowTop}px)`;
       const next = new Set();
       bar.spans.forEach(s => { if (s.s <= tick && tick < s.e) next.add(s.id); });
       let cur = null; for (const s of bar.slots){ if (s.tick <= tick) cur = s; else break; }
