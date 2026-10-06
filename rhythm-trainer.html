@@ -79,7 +79,9 @@ input[type=range]{accent-color:var(--accent);width:100%;margin:0}
 
 /* sticky transport: pinned to the top while scrolling, compact once it is stuck */
 #transportSentinel{height:0;margin-bottom:-18px}
-.transport{position:sticky;top:env(safe-area-inset-top, 0px);z-index:20;transition:padding .15s,box-shadow .15s,border-radius .15s}
+.transport{position:sticky;top:env(safe-area-inset-top, 0px);z-index:20;transition:box-shadow .15s,border-radius .15s}
+/* No scroll anchoring: when the bar switches layout, anchoring would scroll the page and make it flicker */
+html,body{overflow-anchor:none}
 .transport.stuck{border-radius:0 0 14px 14px;box-shadow:0 8px 20px -10px rgba(0,0,0,.45)}
 .transport.compact{padding:8px 14px;gap:8px 18px}
 .transport.compact .play{width:44px;height:44px}
@@ -1485,16 +1487,26 @@ document.addEventListener('keyup', ev => { if (ev.code === 'Space' && !typing(ev
 const shortScreen = matchMedia('(max-height: 500px)');
 let stuck = false;
 function updateTransport(){
-  const t = $('.transport');
+  const t = $('.transport'), slim = shortScreen.matches;
   t.classList.toggle('stuck', stuck);
-  t.classList.toggle('compact', stuck || shortScreen.matches);
-  t.classList.toggle('slim', shortScreen.matches);
+  t.classList.toggle('slim', slim);
+  t.style.marginBottom = '';
+  if (stuck && !slim){
+    // Keep the bar's footprint in the page the same height when it shrinks. Otherwise the page below
+    // gets shorter, scroll anchoring pulls the page back above the switch point, the bar grows again,
+    // and it flickers between the two layouts.
+    t.classList.remove('compact');
+    const full = t.offsetHeight;
+    t.classList.add('compact');
+    t.style.marginBottom = `${full - t.offsetHeight}px`;
+  } else t.classList.toggle('compact', slim);
 }
 new IntersectionObserver(([e]) => {
   stuck = !e.isIntersecting && e.boundingClientRect.top < 0;
   updateTransport();
 }).observe($('#transportSentinel'));
 shortScreen.addEventListener('change', updateTransport);
+addEventListener('resize', () => { if (stuck) updateTransport(); });
 updateTransport();
 
 new ResizeObserver(() => { if (S.comp && Math.abs($('#score').clientWidth - lastW) > 2) render(); }).observe($('#scoreWrap'));
